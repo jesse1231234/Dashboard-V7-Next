@@ -120,7 +120,7 @@ Instructions:
 
     try:
         resp = client.chat.completions.create(
-            model=model_name,   # e.g. "gpt-4.1-mini", "grok-3", etc.
+            model=deployment_name,   # e.g. "gpt-4.1-mini", "grok-3", etc.
             temperature=temperature,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -130,7 +130,7 @@ Instructions:
     except Exception as e:
         # Nice clean error that surfaces the model name, but not internals
         raise RuntimeError(
-            f"OpenAI/Foundry call failed for model '{model_name}': {e}"
+            f"OpenAI/Foundry call failed for model '{deployment_name}': {e}"
         )
 
     return (resp.choices[0].message.content or "").strip()
