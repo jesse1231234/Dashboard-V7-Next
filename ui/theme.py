@@ -4,7 +4,7 @@ import streamlit as st
 
 def apply_theme(
     *,
-    brand: str = "#3B82F6",      # primary accent (blue-500)
+    brand: str = "#000000",      # primary accent (blue-500)
     radius: str = "12px",        # global corner radius
     card_shadow: str = "0 12px 30px rgba(15,23,42,.10)",
     compact_tables: bool = True, # slightly denser tables
@@ -13,9 +13,9 @@ def apply_theme(
     # Fixed light mode palette
     page_bg = "#f3f4f6"          # light gray background
     surface_bg = "#ffffff"       # cards / panels / sidebar
-    subtle_bg = "#e5edff"        # soft blue for callouts / hovers
+    subtle_bg = "#17522a"        # soft blue for callouts / hovers
     border_color = "rgba(15,23,42,.12)"   # light border
-    muted_color = "#4b5563"      # gray-600 for labels / muted text
+    muted_color = "#393e45"      # gray-600 for labels / muted text
     input_bg = "#ffffff"         # white inputs
     input_border = "rgba(15,23,42,.18)"
     input_focus = "rgba(59,130,246,.28)"  # blue focus ring
