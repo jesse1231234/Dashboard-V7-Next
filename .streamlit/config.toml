@@ -1,7 +1,7 @@
 [theme]
 base = "light"
-primaryColor = "#262729"          # same as brand
+primaryColor = "#000000"          # same as brand
 backgroundColor = "#f3f4f6"       # page_bg
 secondaryBackgroundColor = "#ffffff"  # surface_bg (cards, sidebar)
-textColor = "#0f172a"             # slate-900
+textColor = "#000000"             # slate-900
 font = "Inter"
