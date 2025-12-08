@@ -6,7 +6,7 @@ def apply_theme(
     *,
     brand: str = "#000000",      # primary accent (blue-500)
     radius: str = "12px",        # global corner radius
-    card_shadow: str = "0 12px 30px rgba(15,23,42,.10)",
+    card_shadow: str = "#2E5935",
     compact_tables: bool = True, # slightly denser tables
 ):
     """Inject CSS for a clean, simple light theme."""
