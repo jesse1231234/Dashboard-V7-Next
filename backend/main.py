@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- Make sure we can import your existing modules from the repo root ---
@@ -27,32 +28,51 @@ from ai.analysis import generate_analysis
 app = FastAPI(
     title="CLE Analytics Backend",
     description="FastAPI backend that wraps the existing Canvas/Echo360 analytics logic.",
-    version="0.1.0",
+    version="0.2.0",
 )
 
-origins = [
-    "https://dashboard-v7-frontend.vercel.app",  # your actual Vercel URL
+# ⚠️ Update this list with your actual Vercel + backend URLs
+ALLOWED_ORIGINS: List[str] = [
+    "https://dashboard-v7-frontend.vercel.app",  # <-- update to your real Vercel URL
     "https://dashboard-v7-next.onrender.com/",
     "http://localhost:3000",                     # optional, for local dev later
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-
 # ---------- Helpers ----------
+
+def get_canvas_config() -> tuple[str, str]:
+    """
+    Read Canvas base URL and token from environment variables.
+
+    Expected env vars (set in Render):
+      - CANVAS_BASE_URL
+      - CANVAS_TOKEN
+    """
+    base_url = os.getenv("CANVAS_BASE_URL", "").strip()
+    token = os.getenv("CANVAS_TOKEN", "").strip()
+
+    if not base_url or not token:
+        raise RuntimeError(
+            "Missing Canvas configuration. "
+            "Set CANVAS_BASE_URL and CANVAS_TOKEN in the backend environment."
+        )
+
+    return base_url, token
+
 
 def df_to_records(df: Optional[pd.DataFrame]) -> list[Dict[str, Any]]:
     """Convert a DataFrame to list-of-dicts safely for JSON responses."""
     if df is None or df.empty:
         return []
-    # Reset index so index labels become ordinary columns
     return df.reset_index().to_dict(orient="records")
 
 
@@ -60,8 +80,8 @@ def sort_by_canvas_order(df: pd.DataFrame, module_col: str, canvas_df: pd.DataFr
     """
     Sort a dataframe by Canvas module order using module_position; tolerate duplicate names.
 
-    This is adapted from the Streamlit app's helper so the backend returns modules
-    in the same order instructors see in Canvas.
+    This is a copy of the helper from the Streamlit app so the backend
+    returns modules in the same order instructors see in Canvas.
     """
     if (
         df is None
@@ -93,14 +113,17 @@ def sort_by_canvas_order(df: pd.DataFrame, module_col: str, canvas_df: pd.DataFr
     return out
 
 
-def _get_canvas_context(base_url: str, token: str, course_id: int) -> dict:
+def get_canvas_context(course_id: int) -> dict:
     """
     Fetch Canvas-derived context: module order dataframe and student count.
 
-    Mirrors the Streamlit app's:
+    This mirrors the Streamlit app's:
       - fetch_canvas_order_df(...)
       - fetch_student_count(...)
+    but reads base URL + token from environment.
     """
+    base_url, token = get_canvas_config()
+
     svc = CanvasService(base_url, token)
     try:
         canvas_order_df = svc.build_order_df(course_id)
@@ -124,45 +147,54 @@ def health() -> Dict[str, str]:
 
 @app.post("/analyze")
 async def analyze_course(
-    canvas_base_url: str = Form(..., description="Canvas base URL, e.g. https://colostate.instructure.com"),
-    canvas_token: str = Form(..., description="Canvas API token with read access to the course"),
     course_id: int = Form(..., description="Canvas course ID"),
     canvas_gradebook_csv: UploadFile = File(..., description="Canvas gradebook export CSV"),
     echo_analytics_csv: UploadFile = File(..., description="Echo360 analytics CSV export"),
 ) -> Dict[str, Any]:
     """
-    Core endpoint: accepts Canvas credentials + two CSV uploads and returns
-    JSON with de-identified analytics outputs.
+    Core endpoint: accepts course ID + two CSV uploads and returns JSON with
+    de-identified analytics outputs.
 
-    This is the backend equivalent of what your Streamlit app currently does:
-      - Use CanvasService to derive module order + student count
-      - Run Echo/gradebook processors
-      - Compute KPIs
-      - Optionally generate an AI analysis summary
+    Canvas base URL and token are read from environment variables:
+      - CANVAS_BASE_URL
+      - CANVAS_TOKEN
     """
 
     # ---------- 1) Canvas context (module order + student count) ----------
-    ctx = _get_canvas_context(canvas_base_url, canvas_token, int(course_id))
+    try:
+        ctx = get_canvas_context(int(course_id))
+    except RuntimeError as e:
+        # Config error – expose as 500 with clear message
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Canvas fetch error: {e}")
+
     canvas_order_df: pd.DataFrame = ctx["canvas_order_df"]
     student_count: Optional[int] = ctx["student_count"]
 
     # ---------- 2) Read uploaded CSVs ----------
-    canvas_bytes = await canvas_gradebook_csv.read()
-    echo_bytes = await echo_analytics_csv.read()
+    try:
+        canvas_bytes = await canvas_gradebook_csv.read()
+        echo_bytes = await echo_analytics_csv.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error reading uploaded files: {e}")
 
-    # The processors expect file-like objects; wrap bytes with BytesIO.
-    echo_tables: EchoTables = build_echo_tables(
-        io.BytesIO(echo_bytes),
-        canvas_order_df,
-        class_total_students=student_count,
-    )
+    # ---------- 3) Run existing processors ----------
+    try:
+        echo_tables: EchoTables = build_echo_tables(
+            io.BytesIO(echo_bytes),
+            canvas_order_df,
+            class_total_students=student_count,
+        )
 
-    gradebook_tables: GradebookTables = build_gradebook_tables(
-        io.BytesIO(canvas_bytes),
-        canvas_order_df,
-    )
+        gradebook_tables: GradebookTables = build_gradebook_tables(
+            io.BytesIO(canvas_bytes),
+            canvas_order_df,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing CSV data: {e}")
 
-    # ---------- 3) Sort Echo module table to match Canvas order ----------
+    # ---------- 4) Sort Echo module table to match Canvas order ----------
     if echo_tables and echo_tables.module_table is not None:
         echo_module_table_sorted = sort_by_canvas_order(
             echo_tables.module_table,
@@ -172,14 +204,17 @@ async def analyze_course(
     else:
         echo_module_table_sorted = echo_tables.module_table if echo_tables else None
 
-    # ---------- 4) KPIs (same logic as in the Streamlit app) ----------
-    kpis: Dict[str, Any] = compute_kpis(
-        echo_tables=echo_tables,
-        gb_tables=gradebook_tables,
-        students_from_canvas=student_count,
-    )
+    # ---------- 5) KPIs (same logic as in the Streamlit app) ----------
+    try:
+        kpis: Dict[str, Any] = compute_kpis(
+            echo_tables=echo_tables,
+            gb_tables=gradebook_tables,
+            students_from_canvas=student_count,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error computing KPIs: {e}")
 
-    # ---------- 5) AI-generated summary (using ai/analysis.py) ----------
+    # ---------- 6) AI-generated summary (using ai/analysis.py) ----------
     analysis_text: Optional[str] = None
     analysis_error: Optional[str] = None
     try:
@@ -188,18 +223,17 @@ async def analyze_course(
             echo_module_df=echo_module_table_sorted,
             gradebook_module_df=gradebook_tables.module_assignment_metrics_df,
             gradebook_summary_df=gradebook_tables.gradebook_summary_df,
-            # model can be None; generate_analysis will use AZURE_* env/secrets
-            model=None,
+            # 'model' here matches the deployment/model name expected by analysis.py
+            model="gpt-4o-mini",
             temperature=0.3,
         )
     except Exception as e:
         # Don't fail the whole request if Azure OpenAI config is missing/misconfigured
         analysis_error = str(e)
 
-    # ---------- 6) Build JSON-safe response ----------
+    # ---------- 7) Build JSON-safe response ----------
     response: Dict[str, Any] = {
         "course_id": course_id,
-        "canvas_base_url": canvas_base_url,
         "student_count": student_count,
         "kpis": kpis,
         "echo": {
