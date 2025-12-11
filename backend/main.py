@@ -32,6 +32,7 @@ app = FastAPI(
 
 origins = [
     "https://dashboard-v7-frontend.vercel.app",  # your actual Vercel URL
+    "https://dashboard-v7-next.onrender.com/",
     "http://localhost:3000",                     # optional, for local dev later
 ]
 
