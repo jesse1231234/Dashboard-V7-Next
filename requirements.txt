@@ -9,3 +9,6 @@ openai>=1.40
 tabulate
 fastapi
 uvicorn[standard]
+fastapi
+requests
+python-dotenv
