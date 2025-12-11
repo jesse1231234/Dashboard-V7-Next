@@ -1,28 +1,46 @@
 # backend/main.py
+import sys
+from pathlib import Path
+
+# --- make sure we can import your existing code from the repo root ---
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import io
 import pandas as pd
 
+# ✅ adjust these imports to match your real module/function names
 from services.canvas import CanvasService
 from processors.echo_adapter import build_echo_tables
 from processors.grades_adapter import build_gradebook_tables
-from ui.kpis import compute_kpis
-from ai.analysis import generate_analysis
+# If you have something like this:
+# from ui.kpis import compute_kpis
+# from ai.analysis import generate_analysis
 
 app = FastAPI()
 
-# Adjust origins for your Next.js domain
+# CORS so a Next.js frontend can talk to this later
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # lock this down later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 def get_canvas_service(base_url: str, token: str) -> CanvasService:
+    """Helper to construct your Canvas service."""
     return CanvasService(base_url=base_url, token=token)
+
 
 @app.post("/analyze")
 async def analyze_course(
@@ -32,31 +50,48 @@ async def analyze_course(
     canvas_file: UploadFile = File(...),
     echo_file: UploadFile = File(...),
 ):
-    # 1) Canvas student count
+    """
+    Core endpoint: accepts Canvas+Echo CSVs and returns JSON.
+    Later the Next.js UI will call this.
+    """
+    # 1) Canvas student count (adjust to your real method)
     with get_canvas_service(canvas_base_url, canvas_token) as svc:
         student_count = svc.get_student_count(int(course_id))
 
-    # 2) Read uploaded files into dataframes
+    # 2) Read uploaded files into dataframes / buffers
     canvas_bytes = await canvas_file.read()
     echo_bytes = await echo_file.read()
 
     canvas_df = pd.read_csv(io.BytesIO(canvas_bytes))
-    # Use your adapters exactly as you already do
-    echo_tables = build_echo_tables(io.BytesIO(echo_bytes), canvas_df, class_total_students=student_count)
-    gradebook_tables = build_gradebook_tables(io.BytesIO(canvas_bytes), canvas_df)
 
-    # 3) KPIs – adapt this to what compute_kpis expects/returns
-    kpis = compute_kpis(echo_tables=echo_tables, gradebook_tables=gradebook_tables)
+    # 3) Use your existing logic
+    echo_tables = build_echo_tables(
+        io.BytesIO(echo_bytes),
+        canvas_df,
+        class_total_students=student_count,
+    )
+    gradebook_tables = build_gradebook_tables(
+        io.BytesIO(canvas_bytes),
+        canvas_df,
+    )
 
-    # 4) AI analysis – again, reuse your function
-    ai_summary = generate_analysis(kpis=kpis, echo_tables=echo_tables, gradebook_tables=gradebook_tables)
+    # 4) If you have KPI + AI functions, plug them in here
+    # kpis = compute_kpis(echo_tables=echo_tables, gradebook_tables=gradebook_tables)
+    # ai_summary = generate_analysis(
+    #     kpis=kpis,
+    #     echo_tables=echo_tables,
+    #     gradebook_tables=gradebook_tables,
+    # )
 
-    # 5) Return JSON for the frontend
+    # 5) Return something simple for now; we can expand later
     return {
         "student_count": student_count,
-        "kpis": kpis,
-        "analysis": ai_summary,
-        # You can also return sliced data for charts:
-        "echo_summary": echo_tables["summary"].to_dict(orient="records"),
-        "gradebook_summary": gradebook_tables["summary"].to_dict(orient="records"),
+        "echo_summary": echo_tables["summary"].to_dict(orient="records")
+        if "summary" in echo_tables
+        else {},
+        "gradebook_preview": gradebook_tables["summary"].to_dict(orient="records")
+        if "summary" in gradebook_tables
+        else {},
+        # "kpis": kpis,
+        # "analysis": ai_summary,
     }
