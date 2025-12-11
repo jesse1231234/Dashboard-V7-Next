@@ -30,14 +30,19 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS: you can lock this down to your Next.js origin later
+origins = [
+    "https://dashboard-v7-frontend.vercel.app",  # your actual Vercel URL
+    "http://localhost:3000",                     # optional, for local dev later
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # e.g. ["http://localhost:3000", "https://your-frontend.domain"]
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # ---------- Helpers ----------
