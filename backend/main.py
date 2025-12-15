@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -31,20 +32,56 @@ app = FastAPI(
     version="0.2.0",
 )
 
-# ⚠️ Update this list with your actual Vercel + backend URLs
-ALLOWED_ORIGINS: List[str] = [
-    "https://dashboard-v7-frontend.vercel.app",  # <-- update to your real Vercel URL
-    "https://dashboard-v7-next.onrender.com/",
-    "http://localhost:3000",                     # optional, for local dev later
-]
+# Custom origin validator to allow Vercel deployments and localhost
+def is_allowed_origin(origin: str) -> bool:
+    """
+    Allow:
+    - All Vercel deployments (*.vercel.app)
+    - Localhost for development
+    """
+    if origin == "http://localhost:3000":
+        return True
+    if re.match(r"https://.*\.vercel\.app$", origin):
+        return True
+    return False
 
+# Get all origins or use custom validator
+# For FastAPI CORSMiddleware, we can use allow_origin_regex for Vercel
+# and add localhost separately, but it's cleaner to just allow all origins
+# and validate in the middleware if needed.
+
+# OPTION 1: Simple - Allow all (least secure, but easiest)
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# OPTION 2: Better - Use regex for Vercel (more secure)
+# Note: This won't allow localhost, so you'd need to test on Vercel
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# OPTION 3: Most Flexible - List known origins
+# ALLOWED_ORIGINS = [
+#     "https://dashboard-v7-frontend.vercel.app",  # Production
+#     "https://dashboard-v7-frontend-qn2jbexn4.vercel.app",  # Current preview
+#     "http://localhost:3000",  # Local development
+# ]
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=ALLOWED_ORIGINS,
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 
 # ---------- Helpers ----------
