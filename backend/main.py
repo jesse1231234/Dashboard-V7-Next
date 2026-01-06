@@ -214,6 +214,7 @@ async def analyze(
             kpis=kpis,
             echo_module_df=echo_module_sorted,
             gradebook_module_df=gb_module_sorted,
+            gradebook_summary_df=gradebook_summary_df,
         )
     except Exception as e:
         analysis_error = str(e)
