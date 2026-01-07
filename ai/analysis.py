@@ -1,9 +1,10 @@
 # ai/analysis.py
 from __future__ import annotations
-from typing import Optional
+
 import os
+from typing import Optional
+
 import pandas as pd
-import streamlit as st
 from openai import AzureOpenAI
 
 SYSTEM_PROMPT = """You are an academic learning analytics assistant.
@@ -16,34 +17,25 @@ Rules:
 - Keep it under ~500 words unless asked for more.
 """
 
+def _get_env(name: str, default: Optional[str] = None) -> Optional[str]:
+    v = os.getenv(name)
+    return v if v not in (None, "") else default
+
 def _get_ai_client() -> AzureOpenAI:
     """
-    Create an Azure OpenAI client that talks directly to your Azure OpenAI resource.
-
-    Expected secrets/env:
-      - AZURE_OPENAI_ENDPOINT   e.g. "https://my-openai-resource.openai.azure.com"
-      - AZURE_OPENAI_API_KEY    key from the Azure OpenAI resource
-      - AZURE_OPENAI_API_VERSION (optional, default set below)
+    Expected environment variables:
+      - AZURE_OPENAI_ENDPOINT        e.g. "https://my-openai-resource.openai.azure.com"
+      - AZURE_OPENAI_API_KEY         key from the Azure OpenAI resource
+      - AZURE_OPENAI_API_VERSION     optional (defaults below)
     """
-    endpoint = (
-        st.secrets.get("AZURE_OPENAI_ENDPOINT", None)
-        or os.getenv("AZURE_OPENAI_ENDPOINT")
-    )
-    api_key = (
-        st.secrets.get("AZURE_OPENAI_API_KEY", None)
-        or os.getenv("AZURE_OPENAI_API_KEY")
-    )
-    api_version = (
-        st.secrets.get("AZURE_OPENAI_API_VERSION", None)
-        or os.getenv("AZURE_OPENAI_API_VERSION")
-        or "2024-02-15-preview"   # or whatever version your resource uses
-    )
+    endpoint = _get_env("AZURE_OPENAI_ENDPOINT")
+    api_key = _get_env("AZURE_OPENAI_API_KEY")
+    api_version = _get_env("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
 
     if not endpoint or not api_key:
         raise RuntimeError(
             "Missing Azure OpenAI configuration. "
-            "Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY "
-            "in Streamlit secrets or environment variables."
+            "Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY as environment variables."
         )
 
     return AzureOpenAI(
@@ -52,17 +44,22 @@ def _get_ai_client() -> AzureOpenAI:
         api_version=api_version,
     )
 
-
 def _df_to_markdown(df: Optional[pd.DataFrame], max_rows: int = 30) -> str:
     if df is None or df.empty:
         return "(empty)"
     df2 = df.copy().head(max_rows)
-    # round percentage-like columns if any are numeric fractions
+
+    # Round percentage-like columns if any are numeric fractions
     for c in df2.columns:
         if df2[c].dtype.kind in "fc":
-            # if it looks like a fraction, render as %
-            if df2[c].between(0, 1, inclusive="both").mean() > 0.6:
-                df2[c] = (df2[c] * 100).round(1).astype(str) + "%"
+            s = df2[c]
+            try:
+                frac_like = s.between(0, 1, inclusive="both").mean() > 0.6
+            except Exception:
+                frac_like = False
+            if frac_like:
+                df2[c] = (s * 100).round(1).astype(str) + "%"
+
     return df2.to_markdown(index=False)
 
 def generate_analysis(
@@ -76,7 +73,8 @@ def generate_analysis(
     # Build a compact, de-identified payload
     kpi_lines = []
     for k, v in (kpis or {}).items():
-        if v is None: continue
+        if v is None:
+            continue
         if isinstance(v, float) and 0 <= v <= 1:
             kpi_lines.append(f"- {k}: {v*100:.1f}%")
         else:
@@ -101,26 +99,18 @@ Instructions:
 - Be specific: cite modules and metrics with percentages/counts.
 - Call out trends and outliers.
 - Focus on descriptions of the data.
-- identify general trends and data points worthy of further investigation.
+- Identify general trends and data points worthy of further investigation.
 - No need to list each section of the course individually. Simply call out aspects of the data that seem important for further investigation.
-"""
-    
-    # build payload above as you already do...
-
-        # Build the payload (kpis + dataframes) above as you are already doing...
+""".strip()
 
     client = _get_ai_client()
 
-    # Deployment name in your Azure OpenAI resource, e.g. "gpt-4o-prod"
-    deployment_name = (
-        st.secrets.get("AZURE_OPENAI_DEPLOYMENT", None)
-        or os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        or model  # fall back to the function arg if you want
-    )
+    # In Azure OpenAI, "model" here should be your *deployment name*
+    deployment_name = _get_env("AZURE_OPENAI_DEPLOYMENT", model)
 
     try:
         resp = client.chat.completions.create(
-            model=deployment_name,   # e.g. "gpt-4.1-mini", "grok-3", etc.
+            model=deployment_name,
             temperature=temperature,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -128,9 +118,8 @@ Instructions:
             ],
         )
     except Exception as e:
-        # Nice clean error that surfaces the model name, but not internals
         raise RuntimeError(
-            f"OpenAI/Foundry call failed for model '{deployment_name}': {e}"
+            f"Azure OpenAI call failed for deployment '{deployment_name}': {e}"
         )
 
     return (resp.choices[0].message.content or "").strip()
