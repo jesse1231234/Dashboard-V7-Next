@@ -14,7 +14,9 @@ Rules:
 - Call out trends and outliers.
 - Focus on descriptions of the data.
 - Do not make teaching recommendations. Only report on the data.
-- Keep it under ~500 words unless asked for more.
+- Keep it under ~750 words unless asked for more.
+- Use Appropriate Heading structure.
+- Always provide these same sections with these headings: "General Overview", "Echo360 Engagement", "Gradebook Trends", "Notable Trends", and "Further Investigations", in that order.
 """
 
 def _get_env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -101,6 +103,8 @@ Instructions:
 - Focus on descriptions of the data.
 - Identify general trends and data points worthy of further investigation.
 - No need to list each section of the course individually. Simply call out aspects of the data that seem important for further investigation.
+- Provide a short summary at the end of each section.
+- In the "Notable Patterns" section, compare the general values within the Gradebook Module Metrics and the Echo Module Metrics.
 """.strip()
 
     client = _get_ai_client()
